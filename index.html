@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Juego de Guerra Web Mejorado</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: black;
+            font-family: Arial, sans-serif;
+        }
+        #gameCanvas {
+            display: block;
+        }
+        #gameOver, #levelUp {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: white;
+            font-size: 48px;
+            text-align: center;
+            display: none;
+        }
+        #restartButton, #continueButton {
+            font-size: 24px;
+            padding: 10px 20px;
+            margin-top: 20px;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <canvas id="gameCanvas"></canvas>
+    <div id="gameOver">
+        Game Over<br>
+        <span id="finalScore"></span><br>
+        <button id="restartButton">Reiniciar</button>
+    </div>
+    <div id="levelUp">
+        ¡Nivel Completado!<br>
+        <button id="continueButton">Continuar</button>
+    </div>
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const gameOverDiv = document.getElementById('gameOver');
+        const levelUpDiv = document.getElementById('levelUp');
+        const finalScoreSpan = document.getElementById('finalScore');
+        const restartButton = document.getElementById('restartButton');
+        const continueButton = document.getElementById('continueButton');
+
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        let player = {
+            x: canvas.width / 2 - 25,
+            y: canvas.height - 60,
+            width: 50,
+            height: 50,
+            speed: 5,
+            lives: 3
+        };
+
+        let enemies = [];
+        let bullets = [];
+        let powerUps = [];
+        let score = 0;
+        let level = 1;
+        let keys = {};
+        let gameActive = true;
+        let canShoot = true;
+        let shootCooldown = 250;
+        let enemiesKilled = 0;
+        let enemiesForNextLevel = 10;
+
+        function drawPlayer() {
+            ctx.fillStyle = 'blue';
+            ctx.fillRect(player.x, player.y, player.width, player.height);
+        }
+
+        function drawEnemies() {
+            enemies.forEach(enemy => {
+                ctx.fillStyle = enemy.color;
+                ctx.fillRect(enemy.x, enemy.y, enemy.width, enemy.height);
+            });
+        }
+
+        function drawBullets() {
+            ctx.fillStyle = 'yellow';
+            bullets.forEach(bullet => {
+                ctx.fillRect(bullet.x, bullet.y, bullet.width, bullet.height);
+            });
+        }
+
+        function drawPowerUps() {
+            powerUps.forEach(powerUp => {
+                ctx.fillStyle = powerUp.color;
+                ctx.beginPath();
+                ctx.arc(powerUp.x, powerUp.y, powerUp.radius, 0, Math.PI * 2);
+                ctx.fill();
+            });
+        }
+
+        function drawScore() {
+            ctx.fillStyle = 'white';
+            ctx.font = '20px Arial';
+            ctx.fillText(`Puntuación: ${score} | Nivel: ${level} | Vidas: ${player.lives}`, 10, 30);
+        }
+
+        function movePlayer() {
+            if (keys.ArrowLeft && player.x > 0) {
+                player.x -= player.speed;
+            }
+            if (keys.ArrowRight && player.x < canvas.width - player.width) {
+                player.x += player.speed;
+            }
+        }
+
+        function createEnemy() {
+            if (enemies.length < 5 + level) {
+                let enemyType = Math.random();
+                let enemy = {
+                    x: Math.random() * (canvas.width - 50),
+                    y: 0,
+                    width: 50,
+                    height: 50,
+                    speed: Math.random() * 2 + 1 + level * 0.5,
+                    color: 'red'
+                };
+                if (enemyType < 0.2) {
+                    enemy.color = 'purple';
+                    enemy.speed *= 1.5;
+                }
+                enemies.push(enemy);
+            }
+        }
+
+        function createPowerUp() {
+            if (Math.random() < 0.005) {
+                powerUps.push({
+                    x: Math.random() * canvas.width,
+                    y: 0,
+                    radius: 10,
+                    speed: 2,
+                    color: Math.random() < 0.5 ? 'green' : 'cyan',
+                    type: Math.random() < 0.5 ? 'health' : 'rapidFire'
+                });
+            }
+        }
+
+        function moveEnemies() {
+            enemies.forEach(enemy => {
+                enemy.y += enemy.speed;
+            });
+            enemies = enemies.filter(enemy => enemy.y < canvas.height);
+        }
+
+        function moveBullets() {
+            bullets.forEach(bullet => {
+                bullet.y -= bullet.speed;
+            });
+            bullets = bullets.filter(bullet => bullet.y + bullet.height > 0);
+        }
+
+        function movePowerUps() {
+            powerUps.forEach(powerUp => {
+                powerUp.y += powerUp.speed;
+            });
+            powerUps = powerUps.filter(powerUp => powerUp.y < canvas.height);
+        }
+
+        function checkCollisions() {
+            // Colisiones bala-enemigo
+            bullets.forEach((bullet, bulletIndex) => {
+                enemies.forEach((enemy, enemyIndex) => {
+                    if (
+                        bullet.x < enemy.x + enemy.width &&
+                        bullet.x + bullet.width > enemy.x &&
+                        bullet.y < enemy.y + enemy.height &&
+                        bullet.y + bullet.height > enemy.y
+                    ) {
+                        bullets.splice(bulletIndex, 1);
+                        enemies.splice(enemyIndex, 1);
+                        score += enemy.color === 'purple' ? 20 : 10;
+                        enemiesKilled++;
+                        if (enemiesKilled >= enemiesForNextLevel) {
+                            levelUp();
+                        }
+                    }
+                });
+            });
+
+            // Colisiones jugador-enemigo
+            enemies.forEach((enemy, index) => {
+                if (
+                    player.x < enemy.x + enemy.width &&
+                    player.x + player.width > enemy.x &&
+                    player.y < enemy.y + enemy.height &&
+                    player.y + player.height > enemy.y
+                ) {
+                    enemies.splice(index, 1);
+                    player.lives--;
+                    if (player.lives <= 0) {
+                        gameOver();
+                    }
+                }
+            });
+
+            // Colisiones jugador-powerUp
+            powerUps.forEach((powerUp, index) => {
+                if (
+                    player.x < powerUp.x + powerUp.radius &&
+                    player.x + player.width > powerUp.x - powerUp.radius &&
+                    player.y < powerUp.y + powerUp.radius &&
+                    player.y + player.height > powerUp.y - powerUp.radius
+                ) {
+                    if (powerUp.type === 'health') {
+                        player.lives = Math.min(player.lives + 1, 5);
+                    } else if (powerUp.type === 'rapidFire') {
+                        shootCooldown = 100;
+                        setTimeout(() => { shootCooldown = 250; }, 5000);
+                    }
+                    powerUps.splice(index, 1);
+                }
+            });
+        }
+
+        function shoot() {
+            if (canShoot) {
+                bullets.push({
+                    x: player.x + player.width / 2 - 2.5,
+                    y: player.y,
+                    width: 5,
+                    height: 15,
+                    speed: 7
+                });
+                canShoot = false;
+                setTimeout(() => {
+                    canShoot = true;
+                }, shootCooldown);
+            }
+        }
+
+        function levelUp() {
+            level++;
+            enemiesKilled = 0;
+            enemiesForNextLevel = 10 + level * 5;
+            gameActive = false;
+            levelUpDiv.style.display = 'block';
+        }
+
+        function gameOver() {
+            gameActive = false;
+            gameOverDiv.style.display = 'block';
+            finalScoreSpan.textContent = `Puntuación final: ${score}`;
+        }
+
+        function restartGame() {
+            gameActive = true;
+            score = 0;
+            level = 1;
+            enemiesKilled = 0;
+            enemiesForNextLevel = 10;
+            enemies = [];
+            bullets = [];
+            powerUps = [];
+            player.x = canvas.width / 2 - 25;
+            player.y = canvas.height - 60;
+            player.lives = 3;
+            gameOverDiv.style.display = 'none';
+            gameLoop();
+        }
+
+        function continueGame() {
+            gameActive = true;
+            levelUpDiv.style.display = 'none';
+            gameLoop();
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            movePlayer();
+            drawPlayer();
+            drawEnemies();
+            drawBullets();
+            drawPowerUps();
+            drawScore();
+
+            moveEnemies();
+            moveBullets();
+            movePowerUps();
+            checkCollisions();
+            createEnemy();
+            createPowerUp();
+
+            if (keys.Space) {
+                shoot();
+            }
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        document.addEventListener('keydown', (event) => {
+            keys[event.code] = true;
+        });
+
+        document.addEventListener('keyup', (event) => {
+            keys[event.code] = false;
+        });
+
+        restartButton.addEventListener('click', restartGame);
+        continueButton.addEventListener('click', continueGame);
+
+        gameLoop();
+    </script>
+</body>
+</html>
